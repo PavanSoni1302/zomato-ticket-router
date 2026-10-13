@@ -2,6 +2,7 @@ from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 import database
+import re
 
 app = FastAPI(title="Support Ticket Router")
 
@@ -27,6 +28,15 @@ class FeedbackCreate(BaseModel):
 PRIORITY_MAP = {"Low": 1, "Medium": 2, "High": 3, "Critical": 4}
 REVERSE_PRIORITY = {1: "Low", 2: "Medium", 3: "High", 4: "Critical"}
 
+def redact_pii(text: str) -> str:
+    """
+    Security Feature: Masks emails and phone numbers before sending to the LLM 
+    to prevent PII leakage to third-party AI providers.
+    """
+    text = re.sub(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', '[EMAIL REDACTED]', text)
+    text = re.sub(r'\b\d{10}\b', '[PHONE REDACTED]', text)
+    return text
+
 def analyze_ticket_with_llm(ticket_text: str):
     """
     Mock LLM Engine:
@@ -35,7 +45,6 @@ def analyze_ticket_with_llm(ticket_text: str):
     """
     text = ticket_text.lower()
 
-    # 1. Sentiment detection
     if any(word in text for word in ["fuck", "idiot", "stupid", "bastard", "abuse"]):
         sentiment = "Abusive"
     elif any(word in text for word in ["angry", "ruined", "terrible", "worst", "unacceptable", "furious"]):
@@ -45,7 +54,6 @@ def analyze_ticket_with_llm(ticket_text: str):
     else:
         sentiment = "Neutral"
 
-    # 2. Category & Initial Priority detection
     if any(word in text for word in ["refund", "charged twice", "charge", "payment", "money"]):
         category = "Billing"
         initial_priority = "High"
@@ -71,7 +79,6 @@ def analyze_ticket_with_llm(ticket_text: str):
 
 @app.post("/tickets")
 def create_ticket(ticket: TicketCreate, db: Session = Depends(get_db)):
-    # Rule: The same ticket should always get the same priority (Idempotency)
     existing = db.query(database.Ticket).filter(database.Ticket.ticket_text == ticket.ticket_text).first()
     if existing:
         return {
@@ -80,26 +87,22 @@ def create_ticket(ticket: TicketCreate, db: Session = Depends(get_db)):
             "status": "existing_ticket"
         }
 
-    # Step 1: AI semantic analysis (Notice: ticket.customer_email is NEVER passed here)
-    ai_result = analyze_ticket_with_llm(ticket.ticket_text)
+    safe_text = redact_pii(ticket.ticket_text)
+    ai_result = analyze_ticket_with_llm(safe_text)
 
     category = ai_result.get("category", "General")
     sentiment = ai_result.get("sentiment", "Neutral")
     tags = ",".join(ai_result.get("tags", []))
     suggested_reply = ai_result.get("suggested_reply")
 
-    # Step 2: Deterministic Business Rules in Code
     priority_level = PRIORITY_MAP.get(ai_result.get("initial_priority", "Low"), 1)
 
-    # Rule: If angry, increase priority by one level
     if sentiment.lower() == "angry" and priority_level < 4:
         priority_level += 1
 
-    # Rule: If abusive, don't generate a suggested reply
     if sentiment.lower() == "abusive":
         suggested_reply = None
 
-    # Rule: Enterprise customers with 3 or more previous tickets must be High (3) or above
     if ticket.is_enterprise:
         past_ticket_count = db.query(database.Ticket).filter(
             database.Ticket.customer_email == ticket.customer_email
@@ -107,7 +110,6 @@ def create_ticket(ticket: TicketCreate, db: Session = Depends(get_db)):
         if past_ticket_count >= 3 and priority_level < 3:
             priority_level = 3
 
-    # Step 3: Persist to SQLite
     new_ticket = database.Ticket(
         customer_email=ticket.customer_email,
         ticket_text=ticket.ticket_text,
@@ -182,3 +184,18 @@ def submit_feedback(ticket_id: int, feedback: FeedbackCreate, db: Session = Depe
     db.add(fb)
     db.commit()
     return {"message": "Feedback submitted successfully", "ticket_id": ticket_id}
+    
+@app.get("/stats")
+def get_ticket_stats(db: Session = Depends(get_db)):
+    total_tickets = db.query(database.Ticket).count()
+    critical_tickets = db.query(database.Ticket).filter(database.Ticket.priority == 4).count()
+    angry_customers = db.query(database.Ticket).filter(database.Ticket.sentiment == 'Angry').count()
+    
+    return {
+        "metrics": {
+            "total_tickets_processed": total_tickets,
+            "critical_backlog": critical_tickets,
+            "angry_customers": angry_customers
+        },
+        "system_health": "Critical Attention Required" if critical_tickets > 5 else "Normal"
+    }
