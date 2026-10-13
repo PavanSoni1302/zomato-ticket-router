@@ -13,3 +13,7 @@ A dummy for the LLM network call was added to the prototype to ensure core funct
 # The Changes I'd add before this went to production for real.
 
 A few improvements are suggested that would be necessary for use in production: Asynchronous processing, so that no delays in the API are experienced while waiting for a response from the LLM. Tasks could be put on a Redis queue so the API can give an immediate 202 Accepted, and the LLM can run in the background. A change from a sqlite database to a PostgreSQL database, and a Docker container for easier deployment. Improvements in deduplication, using vector embeddings to find tickets that mean the same thing, with different words.
+
+# Bonus Feature
+
+I implemented a PII Redaction filter (redact_pii) using RegEx to strip emails and phone numbers from the ticket text before it gets sent to the LLM. In an enterprise environment, preventing data leakage to third-party AI APIs is critical. I also added a GET /stats endpoint to provide a macro-level dashboard for support managers to monitor critical backlogs and angry customer metrics.
