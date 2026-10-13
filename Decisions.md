@@ -16,4 +16,4 @@ A few improvements are suggested that would be necessary for use in production: 
 
 # Bonus Feature
 
-I implemented a PII Redaction filter (redact_pii) using RegEx to strip emails and phone numbers from the ticket text before it gets sent to the LLM. In an enterprise environment, preventing data leakage to third-party AI APIs is critical. I also added a GET /stats endpoint to provide a macro-level dashboard for support managers to monitor critical backlogs and angry customer metrics.
+I implemented a PII (Personally Identifiable Information) Redaction filter (redact_pii) using RegEx to strip emails and phone numbers from the ticket text before it gets sent to the LLM. In an enterprise environment, preventing data leakage to third-party AI APIs is critical. I also added a GET /stats endpoint to provide a macro-level dashboard for support managers to monitor critical backlogs and angry customer metrics.
